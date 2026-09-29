@@ -2,6 +2,7 @@
     {
         "Name": "Loggie",
         "URL": "https://github.com/SurfyGalaxy/Loggie.git",
+        "Python": "/home/surfygalaxy/Desktop/Coding/Python/Loggie/venv/bin/python3",
         "Entry": "Main.py",
         "Run": true
     }
