@@ -3,6 +3,8 @@ import json
 import os
 import subprocess
 import sys
+import time
+import threading
 
 def make_file_logger(name, filename, level, fmt=None, datefmt=None):
     logger = logging.getLogger(name)
@@ -13,6 +15,31 @@ def make_file_logger(name, filename, level, fmt=None, datefmt=None):
         handler.setFormatter(logging.Formatter(fmt, datefmt=datefmt))
     logger.addHandler(handler)
     return logger
+
+def pump(name, proc):
+    try:
+        for line in proc.stdout:
+            secondary.info(f"{name}: {line.rstrip()}")
+    except Exception as e:
+        primary.error(f"{name}: pump thread died: {e}")
+
+def start_process(program, index):
+    primary.info(f"{program['Name']}: Using {program['Python']} on {program['Entry']}")
+
+    process = subprocess.Popen(
+        [program["Python"], "-u", program["Entry"]],
+        cwd=folder,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    primary.info(f"{program['Name']}: Started, PID {process.pid}")
+
+    threading.Thread(target=pump, args=(program["Name"], process), daemon=True).start()
+
+    plist.append({"Name": program["Name"], "Program": process, "Index": index})
 
 primary = make_file_logger(
     "primary",
@@ -39,8 +66,8 @@ except Exception as e:
 
 primary.info(f"Loaded {len(data)} programs")
 
-programs = {}
-for program in data:
+plist = []
+for index, program in enumerate(data):
     primary.info(f"Loading program '{program["Name"]}'")
     folder = program["URL"].split("/")[4].split(".")[0]
     if os.path.isdir(folder):
@@ -56,8 +83,8 @@ for program in data:
         else:
             primary.error(f"{program["Name"]}: {result.stderr.strip()}")
     else:
-        result = primary.info(f"{program["Name"]}: Cloning from {program["URL"]}")
-        subprocess.run(
+        primary.info(f"{program["Name"]}: Cloning from {program["URL"]}")
+        result = subprocess.run(
             ["git", "clone", program["URL"]],
             capture_output=True
         )
@@ -68,19 +95,21 @@ for program in data:
     
     if program["Run"]:
         if result.returncode != 0 and not os.path.isdir(folder):
-            primary.error(f"{program["Name"]}: Unable to fall back, no directory {folder}")
+            primary.error(f"{program['Name']}: Unable to fall back, no directory {folder}")
             continue
         elif result.returncode != 0:
-            primary.warning(f"{program["Name"]}: Fell back to previous version")
-        primary.info(f"{program["Name"]}: Using {program["Python"]} on {program["Entry"]}")
-        process = subprocess.Popen([program["Python"], program["Entry"]],
-        cwd=folder,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True)
+            primary.warning(f"{program['Name']}: Fell back to previous version")
+        
+        start_process(program, index)
 
-        primary.info(f"{program["Name"]}: Sucessfully started program, PID {process.pid}")
-        out, err = process.communicate()
-        print(err)
-        if err:
-            secondary.warning(f"{program["Name"]}: {err}")
+
+
+primary.info(f"Completed loading programs")
+
+while True:
+    for index, program in enumerate(plist):
+        if program["Program"].poll() is not None:
+            primary.info(f"Watcher: Program {program["Name"]} Dead, respawning")
+            start_process(data[program["Index"]], program["Index"])
+            del plist[index]
+    time.sleep(0.1)
