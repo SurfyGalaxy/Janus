@@ -1,3 +1,4 @@
+import atexit
 import logging
 import json
 import os
@@ -108,8 +109,14 @@ primary.info(f"Completed loading programs")
 
 while True:
     for index, program in enumerate(plist):
-        if program["Program"].poll() is not None:
-            primary.info(f"Watcher: Program {program["Name"]} Dead, respawning")
+        code = program["Program"].poll()
+        if code is not None:
+            primary.info(f"Watcher: Program {program["Name"]} Dead (Code {code}), respawning")
             start_process(data[program["Index"]], program["Index"])
             del plist[index]
     time.sleep(0.1)
+
+@atexit.register
+def end():
+    for program in plist:
+        program["Program"].terminate()
